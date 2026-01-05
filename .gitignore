@@ -13,4 +13,5 @@ coverage
 
 .idea/
 .env
+.env.generated
 .npmrc

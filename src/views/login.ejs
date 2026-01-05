@@ -111,6 +111,9 @@
 <div class="login-page">
     <div class="form">
         <form class="login-form" method="post" action="">
+            <% if (typeof csrfEnabled !== 'undefined' && csrfEnabled && csrfToken) { %>
+                <input type="hidden" name="x-csrf-token" value="<%= csrfToken %>">
+            <% } %>
             <input type="text" name="username" placeholder="Username"/>
             <input type="password" name="password" placeholder="Password"/>
             <button>Login</button>

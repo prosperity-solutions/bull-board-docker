@@ -1,79 +1,139 @@
 import * as dotenv from 'dotenv'
+import crypto from 'crypto';
+import { z } from 'zod';
 
 dotenv.config({
 	quiet: true
 })
 
-function normalizePath(pathStr) {
-	return (pathStr || '').replace(/\/$/, '');
-}
+// Helper to coerce string environment variables to boolean
+const booleanSchema = z
+	.string()
+	.optional()
+	.transform((val) => {
+		if (val === undefined) return undefined;
+		return val.toLowerCase() === 'true';
+	})
+	.pipe(z.boolean());
 
-export const PROXY_PATH = normalizePath(process.env.PROXY_PATH);
+// Helper for inverted boolean (defaults to true, false when set to 'false')
+const invertedBooleanSchema = z
+	.string()
+	.optional()
+	.transform((val) => {
+		if (val === undefined) return true;
+		return val.toLowerCase() !== 'false';
+	})
+	.pipe(z.boolean());
 
-export const config = {
+// Helper to coerce string environment variables to number
+const numberSchema = (defaultValue) => z
+	.string()
+	.optional()
+	.transform((val) => {
+		if (!val) return defaultValue;
+		const num = Number(val);
+		return isNaN(num) ? defaultValue : num;
+	});
+
+// Helper to normalize paths
+const pathSchema = z
+	.string()
+	.optional()
+	.transform((val) => (val || '').replace(/\/$/, ''))
+	.pipe(z.string());
+
+// Define the configuration schema
+const ConfigSchema = z.object({
 	// Redis configuration
-	REDIS_PORT: Number(process.env.REDIS_PORT) || 6379,
-	REDIS_HOST: process.env.REDIS_HOST || 'localhost',
-	REDIS_DB: process.env.REDIS_DB || '0',
-	REDIS_USER: process.env.REDIS_USER, // Redis 6+ requires a username and password to be set
-	REDIS_PASSWORD: process.env.REDIS_PASSWORD,
-	REDIS_USE_TLS: process.env.REDIS_USE_TLS,
-	REDIS_FAMILY: Number(process.env.REDIS_FAMILY) || 0,
-	SENTINEL_NAME: process.env.SENTINEL_NAME,
-	SENTINEL_HOSTS: process.env.SENTINEL_HOSTS,
-	MAX_RETRIES_PER_REQUEST: process.env.MAX_RETRIES_PER_REQUEST,
+	REDIS_PORT: numberSchema(6379),
+	REDIS_HOST: z.string().default('localhost'),
+	REDIS_DB: z.string().default('0'),
+	REDIS_USER: z.string().optional(),
+	REDIS_PASSWORD: z.string().optional(),
+	REDIS_USE_TLS: z.string().optional(),
+	REDIS_FAMILY: numberSchema(0),
+	SENTINEL_NAME: z.string().optional(),
+	SENTINEL_HOSTS: z.string().optional(),
+	MAX_RETRIES_PER_REQUEST: z.string().optional(),
 
 	// Additional Sentinel configuration
-	SENTINEL_ROLE: process.env.SENTINEL_ROLE || 'master', // Role to connect to (master or slave)
-	SENTINEL_USERNAME: process.env.SENTINEL_USERNAME, // Username for authenticating with Sentinel
-	SENTINEL_PASSWORD: process.env.SENTINEL_PASSWORD, // Password for authenticating with Sentinel
-	SENTINEL_RETRY_STRATEGY: process.env.SENTINEL_RETRY_STRATEGY, // Strategy for retrying connections to Sentinel
-	SENTINEL_RECONNECT_STRATEGY: process.env.SENTINEL_RECONNECT_STRATEGY, // Strategy for reconnecting to Sentinel
-	SENTINEL_COMMAND_TIMEOUT: Number(process.env.SENTINEL_COMMAND_TIMEOUT) || undefined, // Timeout for Sentinel commands in ms
-	SENTINEL_TLS_ENABLED: process.env.SENTINEL_TLS_ENABLED === 'true', // Enable TLS for Sentinel mode
-	SENTINEL_UPDATE: process.env.SENTINEL_UPDATE === 'true', // Whether to update the list of Sentinels
-	SENTINEL_MAX_CONNECTIONS: Number(process.env.SENTINEL_MAX_CONNECTIONS) || 10, // Maximum number of connections to Sentinel
-	SENTINEL_FAILOVER_DETECTOR: process.env.SENTINEL_FAILOVER_DETECTOR === 'true', // Whether to enable failover detection
+	SENTINEL_ROLE: z.string().default('master'),
+	SENTINEL_USERNAME: z.string().optional(),
+	SENTINEL_PASSWORD: z.string().optional(),
+	SENTINEL_RETRY_STRATEGY: z.string().optional(),
+	SENTINEL_RECONNECT_STRATEGY: z.string().optional(),
+	SENTINEL_COMMAND_TIMEOUT: numberSchema(undefined),
+	SENTINEL_TLS_ENABLED: booleanSchema.default(false),
+	SENTINEL_UPDATE: booleanSchema.default(false),
+	SENTINEL_MAX_CONNECTIONS: numberSchema(10),
+	SENTINEL_FAILOVER_DETECTOR: booleanSchema.default(false),
 
 	// Additional Redis configuration
-	REDIS_COMMAND_TIMEOUT: Number(process.env.REDIS_COMMAND_TIMEOUT) || undefined, // Command timeout in ms
-	REDIS_SOCKET_TIMEOUT: Number(process.env.REDIS_SOCKET_TIMEOUT) || undefined, // Socket timeout in ms
-	REDIS_KEEP_ALIVE: Number(process.env.REDIS_KEEP_ALIVE) || 0, // Keep-alive in ms
-	REDIS_NO_DELAY: process.env.REDIS_NO_DELAY !== 'false', // Disable Nagle's algorithm
-	REDIS_CONNECTION_NAME: process.env.REDIS_CONNECTION_NAME, // Connection name for client list
-	REDIS_AUTO_RESUBSCRIBE: process.env.REDIS_AUTO_RESUBSCRIBE !== 'false', // Auto resubscribe to channels
-	REDIS_AUTO_RESEND_UNFULFILLED: process.env.REDIS_AUTO_RESEND_UNFULFILLED !== 'false', // Resend unfulfilled commands on reconnect
-	REDIS_CONNECT_TIMEOUT: Number(process.env.REDIS_CONNECT_TIMEOUT) || 10000, // Connection timeout in ms
-	REDIS_ENABLE_OFFLINE_QUEUE: process.env.REDIS_ENABLE_OFFLINE_QUEUE !== 'false', // Enable offline queue
-	REDIS_ENABLE_READY_CHECK: process.env.REDIS_ENABLE_READY_CHECK !== 'false', // Enable ready check
+	REDIS_COMMAND_TIMEOUT: numberSchema(undefined),
+	REDIS_SOCKET_TIMEOUT: numberSchema(undefined),
+	REDIS_KEEP_ALIVE: numberSchema(0),
+	REDIS_NO_DELAY: invertedBooleanSchema,
+	REDIS_CONNECTION_NAME: z.string().optional(),
+	REDIS_AUTO_RESUBSCRIBE: invertedBooleanSchema,
+	REDIS_AUTO_RESEND_UNFULFILLED: invertedBooleanSchema,
+	REDIS_CONNECT_TIMEOUT: numberSchema(10000),
+	REDIS_ENABLE_OFFLINE_QUEUE: invertedBooleanSchema,
+	REDIS_ENABLE_READY_CHECK: invertedBooleanSchema,
 
 	// Queue configuration
-	BULL_PREFIX: process.env.BULL_PREFIX || 'bull',
-	BULL_VERSION: process.env.BULL_VERSION || 'BULLMQ',
-	BACKOFF_STARTING_DELAY: process.env.BACKOFF_STARTING_DELAY || 500,
-	BACKOFF_MAX_DELAY: process.env.BACKOFF_MAX_DELAY || Infinity,
-	BACKOFF_TIME_MULTIPLE: process.env.BACKOFF_TIME_MULTIPLE || 2,
-	BACKOFF_NB_ATTEMPTS: process.env.BACKOFF_NB_ATTEMPTS || 10,
+	BULL_PREFIX: z.string().default('bull'),
+	BULL_VERSION: z.string().default('BULLMQ'),
+	BACKOFF_STARTING_DELAY: numberSchema(500),
+	BACKOFF_MAX_DELAY: numberSchema(Infinity),
+	BACKOFF_TIME_MULTIPLE: numberSchema(2),
+	BACKOFF_NB_ATTEMPTS: numberSchema(10),
 
 	// App configuration
-	BULL_BOARD_HOSTNAME: process.env.BULL_BOARD_HOSTNAME || "0.0.0.0",
-	PORT: process.env.PORT || 3000,
-	PROXY_PATH: PROXY_PATH,
-	USER_LOGIN: process.env.USER_LOGIN,
-	USER_PASSWORD: process.env.USER_PASSWORD,
-	AUTH_ENABLED: Boolean(process.env.USER_LOGIN && process.env.USER_PASSWORD),
-	HOME_PAGE: PROXY_PATH || '/',
-	LOGIN_PAGE: `${PROXY_PATH}/login`,
+	BULL_BOARD_HOSTNAME: z.string().default('0.0.0.0'),
+	PORT: numberSchema(3000),
+	PROXY_PATH: pathSchema,
+	USER_LOGIN: z.string().optional(),
+	USER_PASSWORD: z.string().optional(),
 
 	// Bullboard UI configuration
-	BULL_BOARD_TITLE: process.env.BULL_BOARD_TITLE,
-	BULL_BOARD_LOGO_PATH: process.env.BULL_BOARD_LOGO_PATH,
-	BULL_BOARD_LOGO_WIDTH: process.env.BULL_BOARD_LOGO_WIDTH,
-	BULL_BOARD_LOGO_HEIGHT: process.env.BULL_BOARD_LOGO_HEIGHT,
-	BULL_BOARD_FAVICON: process.env.BULL_BOARD_FAVICON,
-	BULL_BOARD_FAVICON_ALTERNATIVE: process.env.BULL_BOARD_FAVICON_ALTERNATIVE,
-	BULL_BOARD_LOCALE: process.env.BULL_BOARD_LOCALE,
-	BULL_BOARD_DATE_FORMATS_SHORT: process.env.BULL_BOARD_DATE_FORMATS_SHORT,
-	BULL_BOARD_DATE_FORMATS_COMMON: process.env.BULL_BOARD_DATE_FORMATS_COMMON,
-	BULL_BOARD_DATE_FORMATS_FULL: process.env.BULL_BOARD_DATE_FORMATS_FULL,
-};
+	BULL_BOARD_TITLE: z.string().optional(),
+	BULL_BOARD_LOGO_PATH: z.string().optional(),
+	BULL_BOARD_LOGO_WIDTH: z.string().optional(),
+	BULL_BOARD_LOGO_HEIGHT: z.string().optional(),
+	BULL_BOARD_FAVICON: z.string().optional(),
+	BULL_BOARD_FAVICON_ALTERNATIVE: z.string().optional(),
+	BULL_BOARD_LOCALE: z.string().optional(),
+	BULL_BOARD_DATE_FORMATS_SHORT: z.string().optional(),
+	BULL_BOARD_DATE_FORMATS_COMMON: z.string().optional(),
+	BULL_BOARD_DATE_FORMATS_FULL: z.string().optional(),
+
+	// Security configuration
+	SESSION_SECRET: z.string().default(crypto.randomBytes(32).toString('hex')),
+	COOKIE_HTTP_ONLY: booleanSchema.default(true),
+	COOKIE_SECURE: booleanSchema.default(process.env.NODE_ENV === 'production'),
+	COOKIE_SAME_SITE: z.enum(['strict', 'lax', 'none']).default('strict'),
+	COOKIE_MAX_AGE: numberSchema(24 * 60 * 60 * 1000),
+
+	// Rate limiting configuration
+	RATE_LIMIT_ENABLED: booleanSchema.default(true),
+	RATE_LIMIT_LOGIN_WINDOW_MS: numberSchema(15 * 60 * 1000),
+	RATE_LIMIT_LOGIN_MAX: numberSchema(5),
+	RATE_LIMIT_API_WINDOW_MS: numberSchema(1 * 60 * 1000),
+	RATE_LIMIT_API_MAX: numberSchema(500),
+
+	// CSRF protection
+	CSRF_ENABLED: booleanSchema.default(true),
+
+	// Redis SCAN configuration
+	REDIS_SCAN_COUNT: numberSchema(100),
+}).transform((data) => ({
+	...data,
+	// Computed fields
+	AUTH_ENABLED: Boolean(data.USER_LOGIN && data.USER_PASSWORD),
+	HOME_PAGE: data.PROXY_PATH || '/',
+	LOGIN_PAGE: `${data.PROXY_PATH}/login`,
+}));
+
+// Parse and validate the configuration
+export const config = ConfigSchema.parse(process.env);

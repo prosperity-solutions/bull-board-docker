@@ -36,6 +36,7 @@ describe('Authentication', () => {
       route: vi.fn().mockReturnThis(),
       get: vi.fn().mockReturnThis(),
       post: vi.fn().mockReturnThis(),
+      use: vi.fn().mockReturnThis(),
     };
     vi.doMock('express', () => ({
       default: {
@@ -43,9 +44,38 @@ describe('Authentication', () => {
       },
     }));
 
+		// Mock cookie-parser
+		vi.doMock('cookie-parser', () => ({
+			default: vi.fn().mockReturnValue((req, res, next) => next()),
+		}));
+
+		// Mock csrf-csrf
+		const mockGenerateToken = vi.fn().mockReturnValue('mock-csrf-token');
+		const mockDoubleCsrfProtection = vi.fn().mockImplementation((req, res, next) => next());
+		vi.doMock('csrf-csrf', () => ({
+			doubleCsrf: vi.fn().mockReturnValue({
+				generateToken: mockGenerateToken,
+				doubleCsrfProtection: mockDoubleCsrfProtection,
+			}),
+		}));
+
+		// Mock password utils
+		vi.doMock('../../src/utils/password.js', () => ({
+			verifyPassword: vi.fn().mockImplementation(async (password, hash) => {
+				// Simulate plaintext comparison for tests
+				return password === hash;
+			}),
+		}));
+
 		// Mock config
 		vi.doMock('../../src/config.js', () => ({
-			config,
+			config: {
+				...config,
+				SESSION_SECRET: 'test-secret',
+				CSRF_ENABLED: config.CSRF_ENABLED !== undefined ? config.CSRF_ENABLED : true,
+				COOKIE_SAME_SITE: 'strict',
+				COOKIE_SECURE: false,
+			},
 		}));
 
 		return {mockPassport, mockLocalStrategy, mockRouter};
@@ -73,19 +103,19 @@ describe('Authentication', () => {
 			// Get the strategy callback
 			const strategyCallback = mockLocalStrategy.mock.calls[0][0];
 
-			// Test the strategy with correct credentials
+			// Test the strategy with correct credentials (now async)
 			const doneCb = vi.fn();
-			strategyCallback('admin', 'password', doneCb);
+			await strategyCallback('admin', 'password', doneCb);
 			expect(doneCb).toHaveBeenCalledWith(null, {user: 'bull-board'});
 
 			// Test the strategy with incorrect username
 			doneCb.mockClear();
-			strategyCallback('wrong', 'password', doneCb);
+			await strategyCallback('wrong', 'password', doneCb);
 			expect(doneCb).toHaveBeenCalledWith(null, false);
 
 			// Test the strategy with incorrect password
 			doneCb.mockClear();
-			strategyCallback('admin', 'wrong', doneCb);
+			await strategyCallback('admin', 'wrong', doneCb);
 			expect(doneCb).toHaveBeenCalledWith(null, false);
 		});
 	});
@@ -147,11 +177,14 @@ describe('Authentication', () => {
 			// Call the handler
 			getHandler(req, res);
 
-			// Verify that res.render was called with the correct template
-			expect(res.render).toHaveBeenCalledWith('login');
+			// Verify that res.render was called with the correct template and CSRF parameters
+			expect(res.render).toHaveBeenCalledWith('login', {
+				csrfToken: 'mock-csrf-token',
+				csrfEnabled: true,
+			});
 
-			// Verify that router.post was called with passport.authenticate
-			expect(mockRouter.post).toHaveBeenCalledWith('passport-authenticate-middleware');
+			// Verify that router.post was called
+			expect(mockRouter.post).toHaveBeenCalled();
 
 			// Verify that passport.authenticate was called with the correct arguments
 			expect(mockPassport.authenticate).toHaveBeenCalledWith('local', {

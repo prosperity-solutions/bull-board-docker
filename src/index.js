@@ -10,6 +10,7 @@ import {config} from "./config.js";
 import {authRouter} from './login.js';
 import {router} from "./bull.js";
 import {client} from "./redis.js";
+import {loginRateLimit, apiRateLimit} from './middleware/rate-limit.js';
 
 const app = express();
 
@@ -33,13 +34,15 @@ app.use((req, res, next) => {
 
 const sessionOpts = {
 	name: 'bull-board.sid',
-	secret: Math.random().toString(),
+	secret: config.SESSION_SECRET,
 	resave: false,
 	saveUninitialized: false,
 	cookie: {
 		path: '/',
-		httpOnly: false,
-		secure: false
+		httpOnly: config.COOKIE_HTTP_ONLY,
+		secure: config.COOKIE_SECURE,
+		sameSite: config.COOKIE_SAME_SITE,
+		maxAge: config.COOKIE_MAX_AGE
 	}
 };
 
@@ -48,7 +51,16 @@ app.use(passport.initialize({}));
 app.use(passport.session({}));
 app.use(bodyParser.urlencoded({extended: false}));
 
+// Apply general API rate limiting
+if (config.RATE_LIMIT_ENABLED) {
+	app.use(apiRateLimit);
+}
+
 if (config.AUTH_ENABLED) {
+	// Apply login-specific rate limiting
+	if (config.RATE_LIMIT_ENABLED) {
+		app.use(config.LOGIN_PAGE, loginRateLimit);
+	}
 	app.use(config.LOGIN_PAGE, authRouter);
 	app.use(config.HOME_PAGE, ensureLoggedIn(config.LOGIN_PAGE), router);
 } else {

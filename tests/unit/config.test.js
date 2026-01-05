@@ -7,8 +7,8 @@ describe('Configuration', () => {
 	// Helper function to get a fresh config
 	const getConfig = async () => {
 		// Import the module to test
-		const {config, PROXY_PATH} = await import('../../src/config.js');
-		return {config, PROXY_PATH};
+		const {config} = await import('../../src/config.js');
+		return {config};
 	};
 
 	beforeEach(() => {
@@ -168,10 +168,10 @@ describe('Configuration', () => {
 			// Verify that environment variables were loaded correctly
 			expect(config.BULL_PREFIX).toBe('custom-bull');
 			expect(config.BULL_VERSION).toBe('BULL');
-			expect(config.BACKOFF_STARTING_DELAY).toBe('1000');
-			expect(config.BACKOFF_MAX_DELAY).toBe('10000');
-			expect(config.BACKOFF_TIME_MULTIPLE).toBe('3');
-			expect(config.BACKOFF_NB_ATTEMPTS).toBe('5');
+			expect(config.BACKOFF_STARTING_DELAY).toBe(1000);
+			expect(config.BACKOFF_MAX_DELAY).toBe(10000);
+			expect(config.BACKOFF_TIME_MULTIPLE).toBe(3);
+			expect(config.BACKOFF_NB_ATTEMPTS).toBe(5);
 		});
 	});
 
@@ -188,7 +188,7 @@ describe('Configuration', () => {
 			const {config} = await getConfig();
 
 			// Verify that environment variables were loaded correctly
-			expect(config.PORT).toBe('4000');
+			expect(config.PORT).toBe(4000);
 			expect(config.BULL_BOARD_HOSTNAME).toBe('127.0.0.1');
 			expect(config.PROXY_PATH).toBe('/custom-path');
 			expect(config.USER_LOGIN).toBe('admin');
@@ -234,10 +234,9 @@ describe('Configuration', () => {
 			process.env.PROXY_PATH = '/custom-path/';
 
 			// Import the module to test
-			const {config, PROXY_PATH} = await getConfig();
+			const {config} = await getConfig();
 
 			// Verify that paths were normalized correctly
-			expect(PROXY_PATH).toBe('/custom-path');
 			expect(config.PROXY_PATH).toBe('/custom-path');
 			expect(config.HOME_PAGE).toBe('/custom-path');
 			expect(config.LOGIN_PAGE).toBe('/custom-path/login');
@@ -248,10 +247,9 @@ describe('Configuration', () => {
 			process.env.PROXY_PATH = '';
 
 			// Import the module to test
-			const {config, PROXY_PATH} = await getConfig();
+			const {config} = await getConfig();
 
 			// Verify that paths were handled correctly
-			expect(PROXY_PATH).toBe('');
 			expect(config.PROXY_PATH).toBe('');
 			expect(config.HOME_PAGE).toBe('/');
 			expect(config.LOGIN_PAGE).toBe('/login');
@@ -262,10 +260,9 @@ describe('Configuration', () => {
 			delete process.env.PROXY_PATH;
 
 			// Import the module to test
-			const {config, PROXY_PATH} = await getConfig();
+			const {config} = await getConfig();
 
 			// Verify that paths were handled correctly
-			expect(PROXY_PATH).toBe('');
 			expect(config.PROXY_PATH).toBeFalsy();
 			expect(config.HOME_PAGE).toBe('/');
 			expect(config.LOGIN_PAGE).toBe('/login');

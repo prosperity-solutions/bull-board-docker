@@ -74,7 +74,21 @@ Please note that on the interface, the Redis server info button will not work. F
 * `PORT` - port to bind the server to (`3000` by default)
 * `PROXY_PATH` - proxyPath for bull board, e.g. https://<server_name>/my-base-path/queues [docs] (`''` by default)
 * `USER_LOGIN` - login to restrict access to bull-board interface (disabled by default)
-* `USER_PASSWORD` - password to restrict access to bull-board interface (disabled by default)
+* `USER_PASSWORD` - password or bcrypt hash to restrict access (supports both plaintext and bcrypt hashes, **bcrypt recommended** - see [Security](#security) section)
+
+**Security** 🔒
+* `SESSION_SECRET` - **REQUIRED in production**. Cryptographic secret for signing session cookies. Auto-generated in development (insecure). Generate with utility command below. (64-character hex recommended)
+* `COOKIE_HTTP_ONLY` - prevent JavaScript access to cookies (XSS protection) (`true` by default, **recommended**)
+* `COOKIE_SECURE` - only send cookies over HTTPS (`true` in production, `false` in development by default)
+* `COOKIE_SAME_SITE` - CSRF protection via SameSite attribute. Options: `strict` (recommended), `lax`, `none` (`strict` by default)
+* `COOKIE_MAX_AGE` - session expiration time in milliseconds (`86400000` = 24 hours by default)
+* `RATE_LIMIT_ENABLED` - enable/disable rate limiting (`true` by default, **recommended**)
+* `RATE_LIMIT_LOGIN_MAX` - max login attempts per window (`5` by default)
+* `RATE_LIMIT_LOGIN_WINDOW_MS` - login rate limit window in milliseconds (`900000` = 15 minutes by default)
+* `RATE_LIMIT_API_MAX` - max API requests per window (`500` by default)
+* `RATE_LIMIT_API_WINDOW_MS` - API rate limit window in milliseconds (`60000` = 1 minute by default)
+* `CSRF_ENABLED` - enable/disable CSRF protection (`true` by default, **recommended**)
+* `REDIS_SCAN_COUNT` - number of keys to process per SCAN iteration for better Redis performance (`100` by default, range: `10`-`1000`)
 
 **Queue setup**
 * `BULL_PREFIX` - prefix to your bull queue name (`bull` by default)
@@ -97,10 +111,223 @@ Please note that on the interface, the Redis server info button will not work. F
 * `BULL_BOARD_DATE_FORMATS_COMMON` - The date format to use
 * `BULL_BOARD_DATE_FORMATS_FULL` - The date format to use
 
-### Restrict access with login and password
+## Security
 
-To restrict access to bull-board use `USER_LOGIN` and `USER_PASSWORD` env vars.
-Only when both `USER_LOGIN` and `USER_PASSWORD` specified, access will be restricted with login/password
+Bull-board-docker includes comprehensive security features to protect your monitoring dashboard in production environments.
+
+### Authentication
+
+Enable authentication by setting both `USER_LOGIN` and `USER_PASSWORD`:
+
+```bash
+USER_LOGIN=admin
+USER_PASSWORD=your-password-or-hash
+```
+
+**⚠️ Security Best Practice:** Use bcrypt-hashed passwords instead of plaintext for production deployments.
+
+### Password Hashing
+
+**Recommended:** Hash passwords with bcrypt before storing in environment variables.
+
+```bash
+# Generate bcrypt hash for your password
+node -e "import('bcrypt').then(bcrypt => bcrypt.hash('yourpassword', 10).then(console.log))"
+
+# Output example: $2b$10$rKmQ4K.qCBXmzEUeYfC1qeV8p.QTZ5YxJ/Z1Z1Z1Z1Z1Z1Z1Z1Z
+# Use this hash as USER_PASSWORD
+```
+
+**Legacy Support:** Plaintext passwords continue to work but generate security warnings. Migrate to bcrypt hashes for production.
+
+### Session Management
+
+Sessions are cryptographically signed and stored in secure cookies with the following protections:
+
+- **HttpOnly** (`COOKIE_HTTP_ONLY=true`): Prevents JavaScript access to cookies (XSS protection)
+- **Secure** (`COOKIE_SECURE=true`): Ensures cookies only sent over HTTPS in production
+- **SameSite** (`COOKIE_SAME_SITE=strict`): Prevents CSRF attacks
+- **MaxAge** (`COOKIE_MAX_AGE`): Automatic session expiration (24 hours default)
+
+**⚠️ Important:** Always set `SESSION_SECRET` in production to persist sessions across restarts:
+
+```bash
+# Generate secure session secret
+SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+```
+
+If `SESSION_SECRET` is not set, it auto-generates on each restart, invalidating all existing sessions.
+
+### Rate Limiting
+
+Rate limiting protects against brute force attacks and API abuse:
+
+- **Login Protection**: 5 attempts per 15 minutes (configurable via `RATE_LIMIT_LOGIN_MAX`, `RATE_LIMIT_LOGIN_WINDOW_MS`)
+- **API Protection**: 500 requests per minute (configurable via `RATE_LIMIT_API_MAX`, `RATE_LIMIT_API_WINDOW_MS`)
+
+Exceeded limits return HTTP 429 with `Retry-After` header.
+
+**Disable rate limiting** (not recommended for production):
+```bash
+RATE_LIMIT_ENABLED=false
+```
+
+### CSRF Protection
+
+Cross-Site Request Forgery (CSRF) protection is enabled by default using secure tokens.
+
+**Disable CSRF** (only for automated tools or testing):
+```bash
+CSRF_ENABLED=false
+```
+
+### Production Security Checklist
+
+Before deploying to production, ensure:
+
+- ✅ `SESSION_SECRET` is set to a secure random value
+- ✅ `USER_PASSWORD` uses bcrypt hash (not plaintext)
+- ✅ `COOKIE_SECURE=true` (requires HTTPS)
+- ✅ `COOKIE_HTTP_ONLY=true` (default)
+- ✅ `COOKIE_SAME_SITE=strict` (default)
+- ✅ `RATE_LIMIT_ENABLED=true` (default)
+- ✅ `CSRF_ENABLED=true` (default)
+- ✅ HTTPS/TLS configured (reverse proxy or load balancer)
+
+### Security Utility Commands
+
+#### Generate Credentials (Recommended)
+
+Use the built-in script to generate all credentials at once:
+
+```bash
+# Interactive mode (prompts for password and salt rounds)
+# Password input is hidden, credentials written to .env.generated
+npm run generate-credentials
+
+# Provide password as argument (prompts for salt rounds)
+npm run generate-credentials -- mypassword
+
+# Provide both password and salt rounds (10-12 recommended)
+npm run generate-credentials -- mypassword 12
+
+# Output file: .env.generated
+# SESSION_SECRET=1ec050cc241c9537ff5d98c96df1035b...
+# USER_LOGIN=admin
+# USER_PASSWORD=$2b$12$a04b3TNKoK91jI9WK8K/SenZ65Csg30E...
+
+# Use the generated credentials
+cat .env.generated  # Review credentials
+source .env.generated && docker-compose up  # Source for docker-compose
+# Or copy/paste values to your .env file or docker-compose.yml
+```
+
+**Security Benefits:**
+- Password input is hidden when using interactive mode
+- Credentials written to `.env.generated` (never displayed on screen)
+- File automatically added to `.gitignore`
+- No secrets in terminal scrollback or screen recordings
+- Salt rounds are encoded in the hash itself (the `$12$` part)
+
+#### Manual Generation (Alternative)
+
+```bash
+# Generate SESSION_SECRET (64-character hex string)
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# Generate bcrypt password hash
+node -e "import('bcrypt').then(bcrypt => bcrypt.hash('yourpassword', 10).then(console.log))"
+```
+
+#### Testing Security Features
+
+```bash
+# Test rate limiting (should fail on 6th attempt)
+for i in {1..6}; do
+  curl -X POST http://localhost:3000/login -d "username=wrong&password=wrong"
+done
+
+# Verify cookie security flags
+curl -i http://localhost:3000/login | grep -i 'set-cookie'
+# Should show: HttpOnly; Secure (in production); SameSite=Strict
+```
+
+### Migration from Previous Versions
+
+If you're upgrading from a previous version:
+
+#### 1. Sessions Will Be Invalidated
+
+If you don't set `SESSION_SECRET`, all existing sessions become invalid on restart.
+
+**Solution:** Generate and set `SESSION_SECRET` before deploying:
+```bash
+SESSION_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+# Add to your .env or docker-compose.yml
+```
+
+#### 2. Migrate to Hashed Passwords
+
+**Current:** Plaintext password in `USER_PASSWORD`
+**New:** Bcrypt hash (plaintext still works but not recommended)
+
+```bash
+# Generate hash for your current password
+node -e "import('bcrypt').then(bcrypt => bcrypt.hash('your-current-password', 10).then(console.log))"
+
+# Update USER_PASSWORD with the hash
+USER_PASSWORD=$2b$10$...
+```
+
+**Legacy support:** Plaintext passwords continue to work with a warning log.
+
+#### 3. Review Security Settings
+
+New security defaults may affect your setup:
+- `COOKIE_SECURE=true` in production requires HTTPS
+- `RATE_LIMIT_ENABLED=true` limits login attempts
+- `CSRF_ENABLED=true` requires CSRF tokens
+
+**If you need to disable for testing:**
+```bash
+COOKIE_SECURE=false        # Allow HTTP (not recommended)
+RATE_LIMIT_ENABLED=false   # Disable rate limiting (not recommended)
+CSRF_ENABLED=false         # Disable CSRF (not recommended)
+```
+
+### Environment-Specific Configurations
+
+> **Note:** When using Docker, `NODE_ENV=production` is already set in the Dockerfile. Only override if needed for development/testing.
+
+#### Production (Secure - Recommended)
+```bash
+# Docker automatically sets NODE_ENV=production
+SESSION_SECRET=<generated-64-char-hex>
+USER_LOGIN=admin
+USER_PASSWORD=$2b$10$...  # bcrypt hash
+COOKIE_HTTP_ONLY=true
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=strict
+RATE_LIMIT_ENABLED=true
+CSRF_ENABLED=true
+```
+
+#### Development (Relaxed)
+```bash
+NODE_ENV=development       # Override Docker's production default
+USER_LOGIN=admin
+USER_PASSWORD=admin123     # Plaintext OK in dev
+COOKIE_SECURE=false        # Allow HTTP
+RATE_LIMIT_LOGIN_MAX=20    # More attempts for testing
+```
+
+#### Testing/CI (Minimal Security)
+```bash
+NODE_ENV=test              # Override Docker's production default
+COOKIE_SECURE=false
+RATE_LIMIT_ENABLED=false
+CSRF_ENABLED=false
+```
 
 ### Testing
 
@@ -150,6 +377,61 @@ A Healthcheck based on NestJS is available to monitor the status of the containe
 
 ### Example with docker-compose
 
+#### Production (Secure)
+
+```yaml
+services:
+    redis:
+        container_name: redis
+        image: redis:alpine
+        restart: unless-stopped
+        ports:
+            - "6379:6379"
+        volumes:
+            - redis_db_data:/data
+
+    bullboard:
+        container_name: bullboard
+        image: venatum/bull-board:latest
+        restart: unless-stopped
+        environment:
+            # Redis connection
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: example-password
+            REDIS_USE_TLS: 'false'
+            BULL_PREFIX: bull
+
+            # Security (REQUIRED for production)
+            # Generate with: npm run generate-credentials
+            SESSION_SECRET: ${SESSION_SECRET}
+            USER_LOGIN: admin
+            USER_PASSWORD: ${USER_PASSWORD_HASH}
+
+            # Note: Secure defaults are already enabled:
+            # - NODE_ENV=production (Dockerfile)
+            # - COOKIE_SECURE=true, COOKIE_HTTP_ONLY=true, COOKIE_SAME_SITE=strict
+            # - RATE_LIMIT_ENABLED=true (5 login attempts/15min, 500 API req/min)
+            # - CSRF_ENABLED=true
+            # Override only if needed for your specific setup
+        ports:
+            - "3000:3000"
+        depends_on:
+            - redis
+
+volumes:
+    redis_db_data:
+        external: false
+```
+
+Create a `.env` file with your secrets:
+```bash
+SESSION_SECRET=your-64-char-hex-string
+USER_PASSWORD_HASH=$2b$10$your-bcrypt-hash
+```
+
+#### Development (Simplified)
+
 ```yaml
 services:
     redis:
@@ -169,8 +451,15 @@ services:
             REDIS_HOST: redis
             REDIS_PORT: 6379
             REDIS_PASSWORD: example-password
-            REDIS_USE_TLS: 'false'
             BULL_PREFIX: bull
+
+            # Development overrides (disable security for local dev convenience)
+            NODE_ENV: development       # Disables COOKIE_SECURE by default
+            USER_LOGIN: admin
+            USER_PASSWORD: admin123     # Plaintext OK in dev (bcrypt in production!)
+            COOKIE_SECURE: 'false'      # Allow HTTP (no HTTPS required)
+            # Optional: Increase login attempts for testing
+            # RATE_LIMIT_LOGIN_MAX: 20
         ports:
             - "3000:3000"
         depends_on:

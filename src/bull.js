@@ -43,7 +43,22 @@ const {setQueues} = createBullBoard({
 export const router = serverAdapter.getRouter();
 
 async function getBullQueues() {
-	const keys = await client.keys(`${config.BULL_PREFIX}:*`);
+	// Use SCAN instead of KEYS for non-blocking iteration
+	const keys = [];
+	let cursor = '0';
+
+	do {
+		const [newCursor, foundKeys] = await client.scan(
+			cursor,
+			'MATCH',
+			`${config.BULL_PREFIX}:*`,
+			'COUNT',
+			config.REDIS_SCAN_COUNT
+		);
+		keys.push(...foundKeys);
+		cursor = newCursor;
+	} while (cursor !== '0');
+
 	const uniqKeys = new Set(keys.map(key => key.replace(/^.+?:(.+?):.+?$/, '$1')));
 
 	// This increases the number of connections.
